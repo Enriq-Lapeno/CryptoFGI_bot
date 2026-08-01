@@ -3,7 +3,7 @@ import io
 import logging
 import os
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 
 import aiohttp
 import matplotlib
@@ -18,7 +18,6 @@ from aiogram.types import (
     KeyboardButton,
     Message,
     ReplyKeyboardMarkup,
-    URLInputFile,
 )
 from dotenv import load_dotenv
 
@@ -27,8 +26,6 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CMC_API_KEY = os.getenv("CMC_API_KEY")
 
-FNG_API_URL = "https://api.alternative.me/fng/?limit=1&format=json"
-FNG_GAUGE_IMAGE_URL = "https://alternative.me/crypto/fear-and-greed-index.png"
 CMC_FNG_API_URL = "https://pro-api.coinmarketcap.com/v3/fear-and-greed/latest"
 
 GAUGE_ZONES = (
@@ -46,16 +43,6 @@ CLASSIFICATION_RU = {
     "Greed": ("Жадность", "🙂"),
     "Extreme Greed": ("Крайняя жадность", "🤑"),
 }
-
-MARKET_COMMENTS = (
-    (10, "😴📉 Рынок на дне и ищем активно выгодные покупки!"),
-    (30, "🔻🩸 Рынок ещё падает (short), зарабатываем на падении!"),
-    (45, "🤔🌗 Выходной, максимально непонятная ситуация на рынке."),
-    (55, "🧐📊 Ситуация более понятная для анализа. Проводим анализ!"),
-    (70, "😊📈 Позитив на рынке, ищем покупки!"),
-    (90, "🎯💸 Много хороших точек входа для краткосрочной перспективы. Берём по 1% профита с ордера!"),
-    (100, "🚀🔺 Рынок на пике и ждёт разворота. Либо ждём, пока график начнёт опускаться, либо сразу ищем шорты!"),
-)
 
 ABOUT_ISZH_TEXT = (
     "📊 <b>Значения индекса страха и жадности:</b>\n\n"
@@ -78,13 +65,6 @@ GREETING_TEXT = (
 )
 
 
-def get_market_comment(value: int) -> str:
-    for threshold, comment in MARKET_COMMENTS:
-        if value <= threshold:
-            return comment
-    return MARKET_COMMENTS[-1][1]
-
-
 def main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -102,14 +82,6 @@ CHAT_MESSAGE_IDS: dict[int, list[int]] = defaultdict(list)
 
 def track(chat_id: int, message_id: int) -> None:
     CHAT_MESSAGE_IDS[chat_id].append(message_id)
-
-
-async def fetch_fear_greed_index() -> dict:
-    async with aiohttp.ClientSession() as session:
-        async with session.get(FNG_API_URL, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            resp.raise_for_status()
-            payload = await resp.json()
-    return payload["data"][0]
 
 
 async def fetch_cmc_fear_greed() -> dict:
@@ -171,45 +143,9 @@ def format_cmc_caption(data: dict) -> str:
     )
 
 
-def format_index_message(data: dict) -> str:
-    value = int(data["value"])
-    classification_en = data["value_classification"]
-    classification_ru, emoji = CLASSIFICATION_RU.get(classification_en, (classification_en, ""))
-    updated_at = datetime.fromtimestamp(int(data["timestamp"]), tz=timezone.utc)
-    updated_at_str = updated_at.strftime("%d.%m.%Y %H:%M UTC")
-
-    filled = round(value / 10)
-    bar = "🟩" * filled + "⬜" * (10 - filled)
-
-    return (
-        f"{emoji} <b>Индекс страха и жадности крипторынка</b>\n\n"
-        f"Значение: <b>{value}/100</b> — {classification_ru}\n"
-        f"{bar}\n\n"
-        f"{get_market_comment(value)}\n\n"
-        f"Обновлено: {updated_at_str}\n"
-        f'Источник: <a href="https://alternative.me/crypto/">alternative.me</a>'
-    )
-
-
 async def send_fgi_report(message: Message) -> None:
     chat_id = message.chat.id
     track(chat_id, message.message_id)
-
-    try:
-        data = await fetch_fear_greed_index()
-    except Exception:
-        logging.exception("Failed to fetch Fear & Greed Index")
-        msg = await message.answer("Не удалось получить данные индекса. Попробуйте позже.")
-        track(chat_id, msg.message_id)
-        return
-
-    photo = URLInputFile(FNG_GAUGE_IMAGE_URL, filename="fear_and_greed.png")
-    msg1 = await message.answer_photo(
-        photo=photo,
-        caption=format_index_message(data),
-        parse_mode="HTML",
-    )
-    track(chat_id, msg1.message_id)
 
     try:
         cmc_data = await fetch_cmc_fear_greed()
