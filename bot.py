@@ -61,7 +61,7 @@ def main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="ИСЖ"), KeyboardButton(text="Объем (24ч.)")],
-            [KeyboardButton(text="Очистить чат")],
+            [KeyboardButton(text="Очистить историю")],
         ],
         resize_keyboard=True,
     )
@@ -235,7 +235,7 @@ async def handle_top_volume_button(message: Message) -> None:
     track(chat_id, msg.message_id)
 
 
-@router.message(F.text == "Очистить чат")
+@router.message(F.text == "Очистить историю")
 async def handle_reset(message: Message) -> None:
     chat_id = message.chat.id
     track(chat_id, message.message_id)
