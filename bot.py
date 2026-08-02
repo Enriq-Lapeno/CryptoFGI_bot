@@ -24,6 +24,8 @@ CMC_API_KEY = os.getenv("CMC_API_KEY")
 CMC_FNG_API_URL = "https://pro-api.coinmarketcap.com/v3/fear-and-greed/latest"
 CMC_FNG_PAGE_URL = "https://coinmarketcap.com/ru/charts/fear-and-greed-index/"
 CMC_FNG_WIDGET_TITLE = "Индекс страха и жадности CMC"
+CMC_LISTINGS_API_URL = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest"
+TOP_VOLUME_COUNT = 20
 
 CLASSIFICATION_RU = {
     "Extreme Fear": ("Крайний страх", "😱"),
@@ -49,7 +51,8 @@ ABOUT_ISZH_TEXT = (
 GREETING_TEXT = (
     "Привет! 👋\n"
     "Я показываю Индекс Страха и Жадности крипторынка (Fear & Greed Index) 📊😱🤑\n\n"
-    "Нажми кнопку «Узнать какой индекс сейчас» ниже, чтобы получить текущее значение.\n"
+    "Нажми кнопку «ИСЖ» ниже, чтобы получить текущее значение.\n"
+    "Нажми «Объем (24ч.)», чтобы увидеть топ-20 монет по объёму торгов.\n"
     "или «Очистить чат» чтобы очистить этот чат.🧹"
 )
 
@@ -57,7 +60,7 @@ GREETING_TEXT = (
 def main_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Узнать какой индекс сейчас")],
+            [KeyboardButton(text="ИСЖ"), KeyboardButton(text="Объем (24ч.)")],
             [KeyboardButton(text="Очистить чат")],
         ],
         resize_keyboard=True,
@@ -82,6 +85,46 @@ async def fetch_cmc_fear_greed() -> dict:
             resp.raise_for_status()
             payload = await resp.json()
     return payload["data"]
+
+
+async def fetch_top_volume_coins() -> list[dict]:
+    headers = {"X-CMC_PRO_API_KEY": CMC_API_KEY, "Accept": "application/json"}
+    params = {
+        "start": "1",
+        "limit": str(TOP_VOLUME_COUNT),
+        "convert": "USD",
+        "sort": "volume_24h",
+        "sort_dir": "desc",
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            CMC_LISTINGS_API_URL, headers=headers, params=params,
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as resp:
+            resp.raise_for_status()
+            payload = await resp.json()
+    return payload["data"]
+
+
+def format_price(price: float) -> str:
+    if price >= 1:
+        return f"{price:,.2f}"
+    return f"{price:,.6f}".rstrip("0").rstrip(".")
+
+
+def format_top_volume_message(coins: list[dict]) -> str:
+    lines = [
+        "📊 <b>Объём торгов (24ч.)</b>",
+        "Показатель того, какое количество криптовалюты было продано за последние 24 ч.",
+        "",
+    ]
+    for i, coin in enumerate(coins, start=1):
+        price = coin["quote"]["USD"]["price"]
+        lines.append(f"{i}. {coin['name']} ({coin['symbol']}) — ${format_price(price)}")
+
+    lines.append("")
+    lines.append('Источник: <a href="https://coinmarketcap.com/">CoinMarketCap</a>')
+    return "\n".join(lines)
 
 
 async def capture_cmc_widget_png() -> bytes:
@@ -170,9 +213,26 @@ async def handle_fgi(message: Message) -> None:
     await send_fgi_report(message)
 
 
-@router.message(F.text == "Узнать какой индекс сейчас")
+@router.message(F.text == "ИСЖ")
 async def handle_iszh_button(message: Message) -> None:
     await send_fgi_report(message)
+
+
+@router.message(F.text == "Объем (24ч.)")
+async def handle_top_volume_button(message: Message) -> None:
+    chat_id = message.chat.id
+    track(chat_id, message.message_id)
+
+    try:
+        coins = await fetch_top_volume_coins()
+    except Exception:
+        logging.exception("Failed to fetch top volume coins from CoinMarketCap")
+        msg = await message.answer("Не удалось получить данные с CoinMarketCap. Попробуйте позже.")
+        track(chat_id, msg.message_id)
+        return
+
+    msg = await message.answer(format_top_volume_message(coins), parse_mode="HTML")
+    track(chat_id, msg.message_id)
 
 
 @router.message(F.text == "Очистить чат")
